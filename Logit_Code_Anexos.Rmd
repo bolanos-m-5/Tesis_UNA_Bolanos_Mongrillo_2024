@@ -1,0 +1,263 @@
+---
+title: "Modelo Logit"
+author: "Mario Bolanos y JC Mongrillo"
+date: "2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r, include = FALSE}
+library(readxl)
+library(cluster)
+library(factoextra)
+library(fmsb)
+library(FactoMineR)
+library(foreign)
+library(dplyr)
+library(NbClust)
+library(splitstackshape)
+library(xlsx)
+library(rJava)
+library(gtools)
+library(tidyr)
+library(pscl)
+library(traineR)
+library(sparklyr)
+library(caret)
+library(car)
+library(tidyr, warn.conflicts = FALSE)
+library(caret, warn.conflicts = FALSE)
+library(dplyr) 
+library(ggplot2) 
+library(pROC) 
+library(DescTools) 
+library(ResourceSelection) 
+library(coefplot) 
+library(gmodels) 
+library(tinytex) 
+library(fastDummies) 
+library(gridExtra)
+library(RODBC) 
+library(lubridate) 
+library(ggpubr) 
+library(openxlsx) 
+library(Hmisc)
+library(stargazer)
+library(performance)
+library(see)
+library(GGally)
+library(lmtest)
+```
+
+
+```{r, include = FALSE}
+setwd("~/Google Drive/Otras computadoras/Dell 5379/Documentos/UNA/Tesis version final")
+
+```
+
+
+### Lectura de Datos
+```{r}
+#dataset = read.spss("Base_2019_Logit.sav", to.data.frame=TRUE)
+
+dataset2 = read.spss("FT_CENTRAL_I_2022_v1.sav", to.data.frame=TRUE)
+```
+
+### Ajustar Variables (excluyendo Nivel Educativo)
+```{r}
+dataset2$Edad <- droplevels(dataset2$Edad)
+
+dataset2$Edad <- as.character(dataset2$Edad)
+
+dataset2$Edad <- as.integer(dataset2$Edad)
+
+
+dataset2$Idioma <- droplevels(dataset2$Idioma)
+
+dataset2$idiomav2 <- as.factor(ifelse( dataset2$Idioma == "Sí", 1, 0))
+
+dataset2$zonav2 <- as.factor(ifelse( dataset2$Zona == "Urbana", 0, 1))
+
+dataset2$Sexov2 <- as.factor(ifelse(dataset2$Sexo == "Mujer", 0, 1))
+dataset2$Condicion_actividad <- droplevels(dataset2$Condicion_actividad)
+dataset2$Condicion_actividadv2 <-  as.factor(ifelse(dataset2$Condicion_actividad == "Ocupado", 1, 0))
+```
+
+### Ajustar Variable Nivel Educativo (Segùn Modelo a estimar)
+```{r}
+dataset2$calificacion_1 <- as.factor(ifelse(dataset2$Nivel_educativo == "Universitario con título" |dataset2$Nivel_educativo == "Universitario sin título" | dataset2$Nivel_educativo == "Secundaria completa"  |dataset2$Nivel_educativo == "Secundaria incompleta"  |dataset2$Nivel_educativo == "Primaria completa" , 1 , 0 ))
+dataset2$calificacion_2 <- as.factor(ifelse(dataset2$Nivel_educativo == "Universitario con título" |dataset2$Nivel_educativo == "Universitario sin título" | dataset2$Nivel_educativo == "Secundaria completa"  , 1 , 0 ))
+
+dataset2$calificacion_3 <- as.factor(ifelse(dataset2$Nivel_educativo == "Universitario con título", 1 , 0 ))
+```
+
+### Extraer factor de expansión y expandir el dataset
+```{r}
+factor_expand <- dataset2[, 6]
+dataset3 <- expandRows(dataset2, "Factor_ponderacion")
+```
+
+
+### Filtrar Variables Requeridas Dataset y ajustar edad
+```{r}
+datasetv2 <- dataset3[, c(4,11,12,13,14,15,16,17)]
+datasetv2$edadv3 <- as.factor(ifelse(datasetv2$Edad>25, 1,0))
+
+str(datasetv2)
+```
+
+
+### Modelos Logit  con variables individuales
+
+### Modelos con Muestra Completa
+
+```{r}
+ 
+variables <- c("edadv3", "idiomav2", "zonav2", "Sexov2", "calificacion_1", "calificacion_2", "calificacion_3")
+
+glm_models = list()
+glm_models_odds_ratios <- list()
+
+
+for (predictor_var in variables) {
+    formula_str <- paste("Condicion_actividadv2", "~", predictor_var)
+    formula <- as.formula(formula_str)
+    
+    glm_model <- glm(formula, data = datasetv2, family = "binomial")
+    
+    glm_models[[predictor_var]] <- summary(glm_model)$coefficients
+    glm_models_odds_ratios[[predictor_var]] <- exp(glm_model$coefficients)
+  }
+
+glm_models
+Odd_ratios<- t(as.data.frame(glm_models_odds_ratios))
+colnames(Odd_ratios)  <- c("Intercept", "Odd_Ratios_Variable")
+Odd_ratios  <- as.data.frame(Odd_ratios)
+Odd_ratios  <- select( Odd_ratios, Odd_Ratios_Variable)
+Odd_ratios
+```
+
+
+### Modelos por sexo
+
+#### Hombres
+```{r}
+ 
+variables_h <- c("edadv3", "idiomav2", "zonav2", "calificacion_1", "calificacion_2", "calificacion_3")
+glm_models_h = list()
+glm_models_odds_ratios_h <- list()
+
+data_hombres  <- filter(datasetv2, Sexov2 == 1)
+
+for (predictor_var in variables_h) {
+    formula_str <- paste("Condicion_actividadv2", "~", predictor_var)
+    formula <- as.formula(formula_str)
+    
+    glm_model <- glm(formula, data = data_hombres, family = "binomial")
+    
+    glm_models_h[[predictor_var]] <- summary(glm_model)$coefficients
+    glm_models_odds_ratios_h[[predictor_var]] <- exp(glm_model$coefficients)
+  }
+
+#### Presentar Resultados
+glm_models_h
+Odd_ratios_h<- t(as.data.frame(glm_models_odds_ratios_h))
+colnames(Odd_ratios_h)  <- c("Intercept", "Odd_Ratios_Variable")
+Odd_ratios_h  <- as.data.frame(Odd_ratios_h)
+Odd_ratios_h  <- select( Odd_ratios_h, Odd_Ratios_Variable)
+Odd_ratios_h
+```
+
+#### Mujeres
+```{r}
+ 
+variables_m <- c("edadv3", "idiomav2", "zonav2", "calificacion_1", "calificacion_2", "calificacion_3")
+
+glm_models_m = list()
+glm_models_odds_ratios_m <- list()
+
+data_mujeres  <- filter(datasetv2, Sexov2 == 0)
+
+for (predictor_var in variables_m) {
+    formula_str <- paste("Condicion_actividadv2", "~", predictor_var)
+    formula <- as.formula(formula_str)
+    
+    glm_model <- glm(formula, data = data_mujeres, family = "binomial")
+    
+    glm_models_m[[predictor_var]] <- summary(glm_model)$coefficients
+    glm_models_odds_ratios_m[[predictor_var]] <- exp(glm_model$coefficients)
+  }
+
+#### Presentar Resultados
+glm_models_m
+Odd_ratios_m<- t(as.data.frame(glm_models_odds_ratios_m))
+colnames(Odd_ratios_m)  <- c("Intercept", "Odd_Ratios_Variable")
+Odd_ratios_m  <- as.data.frame(Odd_ratios_m)
+Odd_ratios_m  <- select( Odd_ratios_m, Odd_Ratios_Variable)
+Odd_ratios_m
+```
+### Modelos por zona
+
+#### Zona Urbana
+```{r}
+ 
+variables_u <- c("edadv3", "idiomav2", "Sexov2", "calificacion_1", "calificacion_2", "calificacion_3")
+
+glm_models_u = list()
+glm_models_odds_ratios_u <- list()
+
+data_urbana  <- filter(datasetv2, zonav2 == 0)
+
+for (predictor_var in variables_u) {
+    formula_str <- paste("Condicion_actividadv2", "~", predictor_var)
+    formula <- as.formula(formula_str)
+    
+    glm_model <- glm(formula, data = data_urbana, family = "binomial")
+    
+    glm_models_u[[predictor_var]] <- summary(glm_model)$coefficients
+    glm_models_odds_ratios_u[[predictor_var]] <- exp(glm_model$coefficients)
+  }
+
+#### Presentar Resultados
+glm_models_u
+Odd_ratios_u<- t(as.data.frame(glm_models_odds_ratios_u))
+colnames(Odd_ratios_u)  <- c("Intercept", "Odd_Ratios_Variable")
+Odd_ratios_u  <- as.data.frame(Odd_ratios_u)
+Odd_ratios_u  <- select( Odd_ratios_u, Odd_Ratios_Variable)
+Odd_ratios_u
+```
+
+#### Zona Rural
+```{r}
+ 
+variables_r <- c("edadv3", "idiomav2", "Sexov2", "calificacion_1", "calificacion_2", "calificacion_3")
+
+glm_models_r = list()
+glm_models_odds_ratios_r <- list()
+
+data_rural  <- filter(datasetv2, zonav2 == 1)
+
+for (predictor_var in variables_r) {
+    # Construct formula for glm
+    formula_str <- paste("Condicion_actividadv2", "~", predictor_var)
+    formula <- as.formula(formula_str)
+    
+    # Fit glm model
+    glm_model <- glm(formula, data = data_rural, family = "binomial")
+    
+    # Store the glm model in the list
+    glm_models_r[[predictor_var]] <- summary(glm_model)$coefficients
+    glm_models_odds_ratios_r[[predictor_var]] <- exp(glm_model$coefficients)
+  }
+
+#### Presentar Resultados
+glm_models_r
+Odd_ratios_r<- t(as.data.frame(glm_models_odds_ratios_r))
+colnames(Odd_ratios_r)  <- c("Intercept", "Odd_Ratios_Variable")
+Odd_ratios_r  <- as.data.frame(Odd_ratios_r)
+Odd_ratios_r  <- select( Odd_ratios_r, Odd_Ratios_Variable)
+Odd_ratios_r
+```

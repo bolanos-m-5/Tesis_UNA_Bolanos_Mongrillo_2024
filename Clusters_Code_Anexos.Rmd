@@ -1,0 +1,140 @@
+---
+title: "Generación de Clusters"
+author: "Mario Bolanos y Jean C Mongrillo"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+#### Importar Librerias
+```{r}
+library(readxl)
+library(cluster)
+library(factoextra)
+library(fmsb)
+library(FactoMineR)
+library(foreign)
+library(dplyr)
+library(NbClust)
+library(splitstackshape)
+library(xlsx)
+library(rJava)
+```
+
+```{r, include = FALSE}
+#setwd("~/UNA/Tesis version final")
+```
+
+##### Lectura de Datos
+```{r}
+dataset = read.spss("FT_CENTRAL_I_2022_v1.sav", to.data.frame=TRUE)
+```
+
+#### Filtrar Desempleados, setear el factor de expansion  y eliminar columnas no requeridas
+
+```{r}
+desempleado <- subset(dataset, dataset$Condicion_actividad == "Desempleado")
+
+Fact_expand <- desempleado$Factor_ponderacion
+
+desempleadov2 <- desempleado[, c(-2,-6)]
+```
+
+#### Ajustar Variables y eliminar columnas no requeridas
+```{r}
+desempleadov2$Edad <- as.numeric(levels(desempleadov2$Edad))[desempleadov2$Edad]
+
+
+desempleadov2$Nivel_educativo <- factor(desempleadov2$Nivel_educativo, ordered = TRUE)
+
+
+desempleadov2$Idioma <- factor(desempleadov2$Idioma)
+
+desempleadov2 <- desempleadov2[, c(-2, -4, -6, -7,-10, -11)]
+
+desempleadov3 <- desempleadov2[desempleadov2$Edad >=15,]
+
+str(desempleadov3)
+```
+
+### Matriz de distancias
+```{r}
+d1 <- daisy(desempleadov2, metric = "gower")
+
+```
+
+### Optimización de los parámetros
+```{r}
+metodos <- c("ward.D",
+"ward.D2", "single", "complete", "average", "mcquitty", "median", "centroid")
+
+index <- matrix(nrow = 3, ncol = 8)
+best <- matrix(nrow = 8, ncol = 2)
+
+for (i in  1:8) {
+
+datos <- NbClust(d1, diss = d1, distance = NULL, method = metodos[i],
+                 index = "silhouette", min.nc = 4, max.nc = 6)
+ 
+index[,i] <- datos$All.index
+best[i,] <- datos$Best.nc
+ } 
+
+row.names(index) <- c("4_clusters", "5_clusters", "6_clusters")
+colnames(index) <- metodos
+print(index)
+row.names(best) <- metodos
+colnames(best) <- c("Number_of_Clusters", "Silhouette_Index")
+best <- data.frame(best)
+best <- best[order(best$Silhouette_Index, decreasing = TRUE),]
+print(best)
+
+best.model <- row.names(best)[1]
+best.clusters <- best[1,1]
+
+```
+
+### Modelo Final con base en la optimización anterior
+
+```{r}
+modelo1 <- hclust(d1, method = best.model)
+
+fviz_dend(modelo1,
+          k = best.clusters,
+         cex = 1.3,
+          color_labels_by_k = FALSE,
+          rect = TRUE,
+            main = " ", show_labels = FALSE)
+```
+
+### División de la base de datos 
+
+```{r}
+grupos <- cutree(modelo1, k = best.clusters)
+NDatos <- cbind(desempleadov2, Fact_expand , grupos)
+cluster <- NDatos$grupos
+
+sel.cluster <- list()
+datos.cluster <- list()
+
+for (i in 1:best.clusters) {
+  sel.cluster[[i]] <- match(cluster, i, 0)
+  
+  datos.cluster[[i]] <- NDatos[sel.cluster[[i]] > 0,]
+}
+```
+
+### Aplicar el Factor de Expansión a cada grupo y exportar archivos
+
+```{r}
+for (i in 1:best.clusters) {
+
+datos.cluster[[i]] <- expandRows(datos.cluster[[i]], "Fact_expand")
+#name <- paste("Datos.Cluster",i,".csv")
+#archivo <- ("Datos_Cluster")
+#data.grupo <- data.frame(datos.cluster[[i]])
+#write.csv(data.grupo, as.character(name))
+}
+```
+

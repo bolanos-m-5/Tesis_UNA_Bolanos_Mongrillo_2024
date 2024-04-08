@@ -1,0 +1,572 @@
+---
+title: "Modelo Predictivo Desempleo"
+author: "Mario Bolanos y Jean C Mongrillo"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache=TRUE)
+
+
+library(readxl)
+library(cluster)
+library(factoextra)
+library(fmsb)
+##library(dummies)
+library(FactoMineR)
+library(foreign)
+library(ROSE)
+library(traineR)
+library(DrugClust)
+library(caret)
+
+library(readxl)
+library(cluster)
+library(factoextra)
+library(fmsb)
+library(FactoMineR)
+library(foreign)
+library(dplyr)
+library(NbClust)
+library(splitstackshape)
+library(xlsx)
+library(rJava)
+library(epiDisplay)
+
+setwd("~/Documents/UNA")
+```
+
+##### Lectura de Datos
+
+
+
+```{r, warning=FALSE, message=FALSE}
+
+dataset2 = read.spss("FT_CENTRAL_I_2022_v1.sav", to.data.frame=TRUE)
+
+```
+
+##### Ajustar Variables
+```{r}
+dataset2$Edad <- droplevels(dataset2$Edad)
+dataset2$Edad <- as.character(dataset2$Edad)
+dataset2$Edad <- as.integer(dataset2$Edad)
+
+
+dataset2$Condicion_actividad <- droplevels(dataset2$Condicion_actividad)
+
+dataset2$Idioma <- droplevels(dataset2$Idioma)
+
+dataset2$Nivel_educativo <- factor(dataset2$Nivel_educativo, ordered = TRUE)
+
+```
+
+##### Expandir Data según factor de ponderación
+```{r}
+dataset3 <- expandRows(dataset2, "Factor_ponderacion")
+```
+
+##### Filtrar Variables Requeridas
+```{r}
+dataset3 <- dataset3[,c(1,2,4,6,9,10)]
+str(dataset3)
+summary(dataset3)
+```
+
+##### Particionar dataset para entrenar (75% de datos) y testear modelos (25% de datos)
+```{r}
+
+muestra <- createDataPartition(dataset3$Condicion_actividad, p = 0.75, list = F)
+ttraining <- dataset3[muestra,]
+ttesting <- dataset3[-muestra,]
+str(ttraining)
+str(ttesting)
+```
+
+##### Entrenar Modelo de Redes Neuronales con dataset de training
+```{r, eval = FALSE}
+modelo_nnet <- train.nnet(Condicion_actividad~ ., data = ttraining, size = 150, MaxNWts = 10000, rang = 0.01, decay = 5e-4, maxit = 150, trace = TRUE)
+
+```
+
+##### Predecir datos en tabla de testing
+```{r, eval = FALSE}
+prediccion_nnet <- predict(modelo_nnet, ttesting, type = "prob")
+
+prediccion_nnet
+```
+
+##### Optimizar Corte de Probabilidad
+```{r, eval=FALSE}
+indices <- c()
+cortes <- c()
+indices.si  <- c()
+indices.no  <- c()
+
+cort <- seq(0.10, 0.50, by = 0.01)
+
+ for (i in 1:50) {
+   
+Corte <- cort[i]
+Clase <- ttesting[,2]
+
+
+Score <- prediccion_nnet$prediction[,2]
+
+Prediccion <- ifelse(Score > Corte, "Desempleado", "Ocupado")
+MC <- table(Clase, Pred = factor(Prediccion, levels = c("Ocupado", "Desempleado")))
+cortes  [i] <- Corte
+index <- general.indexes(mc = MC)
+indices[i] <- index$overall.accuracy
+indices.si[i] <- index$category.accuracy[1]
+indices.no[i] <- index$category.accuracy[2]
+ }
+
+
+resultados <- cbind(cortes, indices, indices.si, indices.no)
+resultados  <- as.data.frame(resultados)
+
+ggplot(data = resultados, mapping = aes( x= cortes, y = indices)) +
+         
+         geom_line(mapping = aes( x= cortes, y = indices.si, color = "Indices si")) +
+        geom_line(mapping = aes( x= cortes, y = indices.no , color = "Indices no"))  +
+         geom_line(mapping = aes( x= cortes, y = indices , color = "Indices general")) 
+       
+print(resultados)
+
+```
+
+
+##### Guardar modelo
+```{r}
+#saveRDS(modelo_nnet, "./final_model4.rds")
+```
+
+##### Estimar estabilidad del modelo con validación cruzada con 5 grupos distintos
+```{r , eval =FALSE}
+#Asignar Corte Optimo (Previamente Optimizado)
+Corte <- 0.15
+
+#Setear Validacion cruzada
+numero.filas <- nrow(dataset2)
+cantidad.validacion.cruzada <- 1
+cantidad.grupos <- 5
+
+indice <- c()
+
+indices.si<- c()
+
+indices.no <- c()
+
+#Iniciar Validacion Cruzada
+for (i in 1:cantidad.validacion.cruzada) {
+  
+grupos <- createFolds(1:numero.filas, cantidad.grupos) 
+
+indice <-0
+indices.si<- 0
+indices.no <- 0
+  for (k in 1:cantidad.grupos) {
+    muestra <- grupos[[k]] 
+    ttesting <- dataset2[muestra, ]
+    ttraining <- dataset2[-muestra, ]
+    modelo <- train.nnet(Condicion_actividad~ ., data = ttraining, size = 150, MaxNWts = 10000, rang = 0.001,   decay = 5e-4, maxit = 150, trace = TRUE)
+    prediccion <- predict(modelo, ttesting, type = "prob")
+    Clase <- ttesting[,2]
+    Score <- prediccion$prediction[,2]
+    Prediccion <- ifelse(Score > Corte, "Desempleado", "Ocupado")
+    MC <- table(Clase, Pred = factor(Prediccion, levels = c("Ocupado", "Desempleado")))
+
+    index <- general.indexes(mc = MC)
+    indice <- index$overall.accuracy
+    indices.si <- index$category.accuracy[1]
+    indices.no <- index$category.accuracy[2]
+  }
+
+ indice[i] <- indice
+
+  indices.si[i] <- indices.si
+
+  indices.no[i] <- indices.no
+
+}
+
+resultados.indice <- data.frame(
+                         "redes_nnet" = indice)
+
+resultados.indice.si <- data.frame(
+                         "redes_nnet" = indices.si)
+
+resultados.indice.no <- data.frame(
+                                  "redes_nnet" = indices.no)
+
+resultados <- rbind(resultados.indice, resultados.indice.si, resultados.indice.no)
+resultados
+```
+
+### Análisis de Casos
+
+##### Leer modelo optimizado
+```{r}
+
+super_model <- readRDS("./final_model4.rds")
+print(super_model)
+```
+
+##### Setear base de datos a analizar
+```{r}
+
+desempleado <- subset(dataset3, dataset3$Condicion_actividad == "Desempleado")
+ocupado <- subset(dataset3, dataset3$Condicion_actividad == "Ocupado")
+
+ocupado$Prediccion <- as.factor("Ocupado")
+summary(desempleado)
+
+summary(ocupado)
+
+```
+
+#### Caso 1: Dominio de Segundo Idioma
+
+##### Simulacion 1.1: Toda la muestra con variable idioma ajustada
+```{r,  message=FALSE, warning=FALSE}
+desempleado.1 <- desempleado
+desempleado.1$Idioma <- 1
+desempleado.1$Idioma <-factor(desempleado.1$Idioma, levels= c("1", "2"),     labels=c("Sí", "No"))
+
+prediccion1 <- predict(super_model, desempleado.1, type = "prob")
+
+Corte <-0.15
+
+    Clase <- desempleado.1[,2]
+    Score <- prediccion1$prediction[,2]
+    Prediccion <- ifelse(Score > Corte, "Desempleado", "Ocupado")
+    MC <- table(Clase, Pred = factor(Prediccion, levels = c("Ocupado", "Desempleado")))
+
+    index <- general.indexes(mc = MC)
+    indice <- index$overall.accuracy
+    indices.si <- index$category.accuracy[1]
+    indices.no <- index$category.accuracy[2]
+    
+    Prediccion <- as.factor(Prediccion)
+
+    resultados1 <- cbind (desempleado.1,  Prediccion)
+    
+   resultados1.1  <- rbind(resultados1, ocupado)
+   
+   tab1(resultados1.1$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+  tab1(resultados1.1$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+
+  #write.csv(resultados1.1, "Caso1_simulado.csv")
+```
+
+###### Simulacion 1.2: Mujeres
+```{r}
+desempleado.1.2 <- subset(resultados1.1, Sexo == "Mujer")
+    
+tab1(desempleado.1.2$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+tab1(desempleado.1.2$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+
+```
+
+
+###### Simulacion 1.3: Hombres
+```{r}
+desempleado.1.3 <- subset(resultados1.1, Sexo == "Hombre")
+
+tab1(desempleado.1.3$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+tab1(desempleado.1.3$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+
+```
+
+
+
+###### Simulacion 1.4: Zona Urbana
+```{r}
+desempleado.1.4 <- subset(resultados1.1, Zona == "Urbana")
+
+tab1(desempleado.1.4$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+tab1(desempleado.1.4$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+
+```
+
+###### Simulacion 1.5: Zona Rural
+```{r}
+desempleado.1.5 <- subset(resultados1.1, Zona == "Rural")
+
+tab1(desempleado.1.5$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+tab1(desempleado.1.5$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+
+```
+
+
+###### Simulacion 1.6: 25 años o menos
+```{r}
+desempleado.1.6 <- subset(resultados1.1, Edad <= 25)
+     
+tab1(desempleado.1.6$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+ tab1(desempleado.1.6$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+```
+
+
+###### Simulacion 1.7: 35 años o menos
+```{r}
+desempleado.1.7 <- subset(resultados1.1, Edad <= 35)
+     
+tab1(desempleado.1.7$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+tab1(desempleado.1.7$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+```
+
+
+###### Simulacion 1.8: 36 años o mas
+```{r}
+desempleado.1.8 <- subset(resultados1.1, Edad > 35)
+
+    tab1(desempleado.1.8$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(desempleado.1.8$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+```
+
+#### Caso 2: Todos Secundaria Completa o Superior
+
+###### Simulacion 2.1: Toda la muestra con variable educación ajustada
+```{r, message=FALSE, warning=FALSE}
+desempleado.2 <- desempleado
+desempleado.2$Nivel_educativo <- as.numeric(desempleado.2$Nivel_educativo)
+desempleado.2$Nivel_educativo <- ifelse(desempleado.2$Nivel_educativo<=5, 5, desempleado.2$Nivel_educativo)
+desempleado.2$Nivel_educativo <-factor (desempleado.2$Nivel_educativo, levels= c("1", "2","3","4","5","6","7"),labels=c("Ninguno", "Primaria incompleta",                   "Primaria completa","Secundaria incompleta", "Secundaria completa", "Universitario sin título", "Universitario con título"))
+
+summary(desempleado.2)
+```
+
+
+```{r}
+prediccion2 <- predict(super_model, desempleado.2, type = "prob")
+
+Corte <-0.15
+
+    Clase <- desempleado.2[,2]
+    Score <- prediccion2$prediction[,2]
+    Prediccion <- ifelse(Score > Corte, "Desempleado", "Ocupado")
+    MC <- table(Clase, Pred = factor(Prediccion, levels = c("Ocupado", "Desempleado")))
+
+    index <- general.indexes(mc = MC)
+    indice <- index$overall.accuracy
+    indices.si <- index$category.accuracy[1]
+    indices.no <- index$category.accuracy[2]
+    
+    Prediccion <- as.factor(Prediccion)
+
+    resultados2 <- cbind (desempleado.2,  Prediccion)
+    
+   resultados2.1  <- rbind(resultados2, ocupado)
+    #summary(resultados1.1)
+
+     tab1(resultados2.1$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(resultados2.1$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+#write.csv(resultados2.1, "Caso2_simulado.csv")
+```
+
+###### Simulacion 2.2: Mujeres
+```{r}
+desempleado.2.2 <- subset(resultados2.1, Sexo == "Mujer")
+
+
+    tab1(desempleado.2.2$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(desempleado.2.2$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+
+```
+
+
+###### Simulacion 2.3: Hombres
+```{r}
+desempleado.2.3 <- subset(resultados2.1, Sexo == "Hombre")
+
+    tab1(desempleado.2.3$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(desempleado.2.3$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+
+```
+
+
+
+###### Simulacion 2.4: Zona Urbana
+```{r}
+desempleado.2.4 <- subset(resultados2.1, Zona == "Urbana")
+
+    tab1(desempleado.2.4$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(desempleado.2.4$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+
+```
+
+###### Simulacion 2.5: Zona Rural
+```{r}
+desempleado.2.5 <- subset(resultados2.1, Zona == "Rural")
+
+    tab1(desempleado.2.5$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(desempleado.2.5$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+
+```
+
+###### Simulacion 2.6: 25 años o menos
+```{r}
+desempleado.2.6 <- subset(resultados2.1, Edad <= 25)
+
+    tab1(desempleado.2.6$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(desempleado.2.6$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+```
+
+
+###### Simulacion 2.7: 35 años o menos
+```{r}
+desempleado.2.7 <- subset(resultados2.1, Edad <= 35)
+
+    tab1(desempleado.2.7$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(desempleado.2.7$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+```
+
+
+###### Simulacion 2.8: 36 años o mas
+```{r}
+desempleado.2.8 <- subset(resultados2.1, Edad > 35)
+
+    tab1(desempleado.2.8$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(desempleado.2.8$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+```
+
+
+#### Caso 3: Todos Secundaria Completa o Superior y Dominio de Segundo Idioma
+
+
+###### Simulacion 3.1: Toda la muestra con variables educación e idioma Ajustadas
+```{r, message=FALSE, warning=FALSE}
+desempleado.3 <- desempleado
+desempleado.3$Idioma <- 1
+desempleado.3$Idioma <-factor(desempleado.3$Idioma, levels= c("1", "2"),     labels=c("Sí", "No"))
+
+desempleado.3$Nivel_educativo <- as.numeric(desempleado.3$Nivel_educativo)
+desempleado.3$Nivel_educativo <- ifelse(desempleado.3$Nivel_educativo<=5, 5, desempleado.3$Nivel_educativo)
+desempleado.3$Nivel_educativo <-factor (desempleado.3$Nivel_educativo, levels= c("1", "2","3","4","5","6","7"),labels=c("Ninguno", "Primaria incompleta",                   "Primaria completa","Secundaria incompleta", "Secundaria completa", "Universitario sin título", "Universitario con título"))
+
+
+
+summary(desempleado.3)
+```
+
+
+```{r}
+prediccion3 <- predict(super_model, desempleado.3, type = "prob")
+
+Corte <-0.15
+
+    Clase <- desempleado.3[,2]
+    Score <- prediccion3$prediction[,2]
+    Prediccion <- ifelse(Score > Corte, "Desempleado", "Ocupado")
+    MC <- table(Clase, Pred = factor(Prediccion, levels = c("Ocupado", "Desempleado")))
+
+    index <- general.indexes(mc = MC)
+    indice <- index$overall.accuracy
+    indices.si <- index$category.accuracy[1]
+    indices.no <- index$category.accuracy[2]
+    
+    Prediccion <- as.factor(Prediccion)
+
+    resultados3 <- cbind (desempleado.3,  Prediccion)
+    
+   resultados3.1  <- rbind(resultados3, ocupado)
+    #summary(resultados1.1)
+
+     tab1(resultados3.1$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(resultados3.1$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+#write.csv(resultados3.1, "Caso3_simulado.csv")
+```
+
+###### Simulacion 3.2:  Mujeres
+```{r}
+desempleado.3.2 <- subset(resultados3.1, Sexo == "Mujer")
+
+    tab1(desempleado.3.2$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(desempleado.3.2$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+
+```
+
+
+###### Simulacion 3.3: Hombres
+```{r}
+desempleado.3.3 <- subset(resultados3.1, Sexo == "Hombre")
+
+    tab1(desempleado.3.3$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(desempleado.3.3$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+
+```
+
+
+
+###### Simulacion 3.4: Zona Urbana
+```{r}
+desempleado.3.4 <- subset(resultados3.1, Zona == "Urbana")
+     
+
+    tab1(desempleado.3.4$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(desempleado.3.4$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+
+```
+
+###### Simulacion 3.5: Zona Rural
+```{r}
+desempleado.3.5 <- subset(resultados3.1, Zona == "Rural")
+     
+
+    tab1(desempleado.3.5$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(desempleado.3.5$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+
+```
+
+###### Simulacion 3.6: Todos Secundaria e idioma 25 años o menos
+```{r}
+desempleado.3.6 <- subset(resultados3.1, Edad <= 25)
+
+    tab1(desempleado.3.6$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(desempleado.3.6$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+```
+
+
+###### Simulacion 3.7:  35 años o menos
+```{r}
+desempleado.3.7 <- subset(resultados3.1, Edad <= 35)
+
+    tab1(desempleado.3.7$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(desempleado.3.7$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+```
+
+###### Simulacion 3.8:  36 años o mas
+```{r}
+desempleado.3.8 <- subset(resultados3.1, Edad > 35)
+     
+    tab1(desempleado.3.8$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+     tab1(desempleado.3.8$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+```
+
+
