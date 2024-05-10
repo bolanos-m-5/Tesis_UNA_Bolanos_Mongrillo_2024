@@ -1,0 +1,249 @@
+---
+title: "Modelo Logit"
+author: "Mario Bolanos y JC Mongrillo"
+date: "2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r, include = FALSE}
+library(readxl)
+library(cluster)
+library(factoextra)
+library(fmsb)
+library(FactoMineR)
+library(foreign)
+library(dplyr)
+library(NbClust)
+library(splitstackshape)
+library(xlsx)
+library(rJava)
+library(gtools)
+library(tidyr)
+library(pscl)
+library(traineR)
+library(sparklyr)
+library(caret)
+library(car)
+library(tidyr, warn.conflicts = FALSE)
+library(caret, warn.conflicts = FALSE)
+library(dplyr) 
+library(ggplot2) 
+library(pROC) 
+library(DescTools) 
+library(ResourceSelection) 
+library(coefplot) 
+library(gmodels) 
+library(tinytex) 
+library(fastDummies) 
+library(gridExtra)
+library(RODBC) 
+library(lubridate) 
+library(ggpubr) 
+library(openxlsx) 
+library(Hmisc)
+library(stargazer)
+library(performance)
+library(see)
+library(GGally)
+library(lmtest)
+```
+
+
+```{r, include = FALSE}
+setwd("~/Google Drive/Otras computadoras/Dell 5379/Documentos/UNA/Tesis version final")
+
+```
+
+
+### Lectura de Datos
+```{r}
+# La base de datos a utilizar es format .sav (codificado para SPSS software) y corresponde a un extracto de los microdatos de la  Encuesta Continua de Empleo, filtrando la region de planificación= Central y Fuerza de trabajo = Verdadero. 
+
+#dataset = read.spss("Base_2019_Logit.sav", to.data.frame=TRUE)
+
+dataset2 = read.spss("FT_CENTRAL_I_2022_v1.sav", to.data.frame=TRUE)
+```
+
+### Ajustar Variables (excluyendo Nivel Educativo)
+```{r}
+# se realiza un ajuste de la variable Edad, convirtiéndolas en aptas para la modelación. Pasánodola de tipo nivel a tipo número entero.
+dataset2$Edad <- droplevels(dataset2$Edad)
+
+dataset2$Edad <- as.character(dataset2$Edad)
+
+dataset2$Edad <- as.integer(dataset2$Edad)
+
+
+# Las variables Idioma, zona, sexo  y condicion de actividad se convierten en tipo dicotómicas (1 o 0), para poder ser analizadas en los modelos.
+dataset2$Idioma <- droplevels(dataset2$Idioma)
+
+dataset2$idiomav2 <- as.factor(ifelse( dataset2$Idioma == "Sí", 1, 0))
+
+dataset2$zonav2 <- as.factor(ifelse( dataset2$Zona == "Urbana", 0, 1))
+
+dataset2$Sexov2 <- as.factor(ifelse(dataset2$Sexo == "Mujer", 0, 1))
+
+dataset2$Condicion_actividad <- droplevels(dataset2$Condicion_actividad)
+dataset2$Condicion_actividadv2 <-  as.factor(ifelse(dataset2$Condicion_actividad == "Ocupado", 1, 0))
+```
+
+### Ajustar Variable Nivel Educativo (Segùn Modelo a estimar)
+```{r}
+
+# La variable Nivel Educativo, se ajusta en tres nuevas variables según dichos niveles: 
+# 1) calificacion 1 =  Primaria completa  o superior
+# 2) calificacion 2 = Secundaria completa o superior
+# 3) calficacion 3 = Universitarion con titulo 
+
+# Además, estas se transforman en tipo dicotómicas 
+
+
+dataset2$calificacion_1 <- as.factor(ifelse(dataset2$Nivel_educativo == "Universitario con título" |dataset2$Nivel_educativo == "Universitario sin título" | dataset2$Nivel_educativo == "Secundaria completa"  |dataset2$Nivel_educativo == "Secundaria incompleta"  |dataset2$Nivel_educativo == "Primaria completa" , 1 , 0 ))
+
+
+dataset2$calificacion_2 <- as.factor(ifelse(dataset2$Nivel_educativo == "Universitario con título" |dataset2$Nivel_educativo == "Universitario sin título" | dataset2$Nivel_educativo == "Secundaria completa"  , 1 , 0 ))
+
+dataset2$calificacion_3 <- as.factor(ifelse(dataset2$Nivel_educativo == "Universitario con título", 1 , 0 ))
+```
+
+### Extraer factor de expansión y expandir el dataset
+```{r}
+
+# La base de datos del INEC viene con base en la muestra y un factor de expansion que permite expandir la muestra a valores estimados de la población por lo que se extrae dicha variable y además se crea un nuevo dataset con dicho factor aplicado.
+
+factor_expand <- dataset2[, 6]
+dataset3 <- expandRows(dataset2, "Factor_ponderacion")
+```
+
+
+### Filtrar Variables Requeridas Dataset y crear valor de edad ajustado
+```{r}
+
+# Se filtran las columnas destinadas para ser testeadas en los modelos logit
+datasetv2 <- dataset3[, c(4,11,12,13,14,15,16,17)]
+
+# Se crea una nueva variable = Edadv3, la cual ajusta la edad en tipo dicotómico
+datasetv2$edadv3 <- as.factor(ifelse(datasetv2$Edad>25, 1,0))
+
+str(datasetv2)
+```
+### Crear funcion de Pseudo R2
+
+```{r}
+r2 <- function(created_model) {
+ dev <- created_model$deviance
+ null_dev <- created_model$null.deviance
+ model_n <- length(created_model$fitted.values) 
+ R_l <- 1 - dev / null_dev
+ R_cs <- 1 - exp(-(null_dev - dev) / model_n) 
+ R_n <- R_cs / (1 - exp(-(null_dev /model_n))) 
+return( cbind(R_l, R_cs, R_n ) )
+ 
+ }
+```
+
+
+### Modelos Logit
+
+### Modelo con Muestra Completa
+
+```{r}
+    
+dataset_final <- datasetv2[, c(-1)]
+
+glm_model <- glm(Condicion_actividadv2~. , data = dataset_final, family = "binomial")
+    
+    summary(glm_model)$coefficients
+    exp(glm_model$coefficients)
+    glm_model$null.deviance
+     glm_model$deviance
+    
+    r2(glm_model)
+```
+
+
+### Modelos por sexo
+
+#### Hombres
+
+```{r}
+data_hombres  <- filter(dataset_final, Sexov2 == 1)
+data_hombres  <- data_hombres[, -c(3)]
+str(data_hombres)
+```
+
+```{r}
+
+    glm_model_h <- glm(Condicion_actividadv2~. , data = data_hombres, family = "binomial")
+    
+    summary(glm_model_h)$coefficients
+    exp(glm_model_h$coefficients)
+    glm_model_h$null.deviance
+    glm_model_h$deviance
+    
+    r2(glm_model_h)
+```
+
+#### Mujeres
+
+```{r}
+data_mujeres  <- filter(dataset_final, Sexov2 == 0)
+data_mujeres  <- data_mujeres[, -c(3)]
+str(data_mujeres)
+```
+
+```{r}
+
+    glm_model_m <- glm(Condicion_actividadv2~. , data = data_mujeres, family = "binomial")
+    
+    summary(glm_model_m)$coefficients
+    exp(glm_model_m$coefficients)
+    glm_model_m$null.deviance
+    glm_model_m$deviance
+    
+    r2(glm_model_m)
+```
+### Modelos por zona
+
+#### Zona Urbana
+
+```{r}
+data_urbana  <- filter(dataset_final, zonav2 == 0)
+data_urbana  <- data_urbana[, -c(2)]
+str(data_urbana )
+```
+
+```{r}
+
+    glm_model_u <- glm(Condicion_actividadv2~. , data = data_urbana, family = "binomial")
+    
+    summary(glm_model_u)$coefficients
+    exp(glm_model_u$coefficients)
+    glm_model_u$null.deviance
+    glm_model_u$deviance
+    
+    r2(glm_model_u)
+```
+#### Zona Rural
+
+```{r}
+data_rural  <- filter(dataset_final, zonav2 == 1)
+data_rural  <- data_rural[, -c(2)]
+str(data_rural )
+```
+
+```{r}
+    glm_model_r <- glm(Condicion_actividadv2~. , data = data_rural, family = "binomial")
+    summary(glm_model_r)$coefficients
+    exp(glm_model_r$coefficients)
+    glm_model_r$null.deviance
+    glm_model_r$deviance
+    r2(glm_model_r)
+```
+  
+  
+

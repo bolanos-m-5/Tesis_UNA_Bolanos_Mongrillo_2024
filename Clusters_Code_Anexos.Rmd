@@ -26,57 +26,80 @@ library(rJava)
 #setwd("~/UNA/Tesis version final")
 ```
 
-##### Lectura de Datos
+##### Lectura de Datos:
+
+
 ```{r}
+
+# La base de datos a utilizar es format .sav (codificado para SPSS software) y corresponde a un extracto de los microdatos de la  Encuesta Continua de Empleo, filtrando la region de planificación= Central y Fuerza de trabajo = Verdadero
+
 dataset = read.spss("FT_CENTRAL_I_2022_v1.sav", to.data.frame=TRUE)
 ```
 
 #### Filtrar Desempleados, setear el factor de expansion  y eliminar columnas no requeridas
 
+
 ```{r}
+# Fltrar base de datos de fuerza laboral solamente los que tengan condicion de desempleado, ya que los clusters solamente abarcan desempleados
 desempleado <- subset(dataset, dataset$Condicion_actividad == "Desempleado")
 
+
+# La base de datos del INEC viene con base en la muestra y un factor de expansion que permite expandir la muestra a valores estimados de la población por lo que se extrae dicha variable.
 Fact_expand <- desempleado$Factor_ponderacion
 
+# Se filtran solamente las variables a utilizar en el proceso de clusterizacion
 desempleadov2 <- desempleado[, c(-2,-6)]
 ```
 
 #### Ajustar Variables y eliminar columnas no requeridas
 ```{r}
+# La Variable Edad viene de su origen en niveles, por lo que se pasa a factor numerico
 desempleadov2$Edad <- as.numeric(levels(desempleadov2$Edad))[desempleadov2$Edad]
 
-
+# Las variablees nivel educativo e idioma, vienen en texto y se pasan a tipo factor.
 desempleadov2$Nivel_educativo <- factor(desempleadov2$Nivel_educativo, ordered = TRUE)
-
-
 desempleadov2$Idioma <- factor(desempleadov2$Idioma)
 
-desempleadov2 <- desempleadov2[, c(-2, -4, -6, -7,-10, -11)]
 
+# Se filtran las variables finales y se filtra la variable edad>=15 para evitar valores no deseados
+desempleadov2 <- desempleadov2[, c(-2, -4, -6, -7,-10, -11)]
 desempleadov3 <- desempleadov2[desempleadov2$Edad >=15,]
 
+#Se imprime un detalle de la estructura de la base de datos final a clusterizar
 str(desempleadov3)
 ```
 
 ### Matriz de distancias
 ```{r}
+# Los metodos de clusterizacion, cuando existen variable no numericas (Ej, Nivel Educativo), necesitan aplicar un ajuste matematico en el que dichas variables se transforman en numeros para poder identificar las similitudes entre observaciones. 
+
+# Por lo que se utiliza la funcion "Daisy" que permite hacer dicho ajuste con el metodo "gower"
+
 d1 <- daisy(desempleadov2, metric = "gower")
 
 ```
 
 ### Optimización de los parámetros
 ```{r}
+# Se definen los metodos de Clusterizacion a utilizar en el ciclo de oprtimizacion
 metodos <- c("ward.D",
 "ward.D2", "single", "complete", "average", "mcquitty", "median", "centroid")
 
+# Se definen las matrices en blanco donde posteriormente se almacenaran los resultados de clusterizacion por metodo y cantidad de clusters
 index <- matrix(nrow = 3, ncol = 8)
 best <- matrix(nrow = 8, ncol = 2)
+
+
+
+# Se inicia un ciclo donde see prueban los 8 metodos establecidos anteriormente con cantidad de clusters entre 4 y 6, para buscar las mayor precisión.
+
+# Se imprimen los resultados en las matrices previamente creadas y al final se filtra el metodo y cantidad de clusters con mejor precision.
 
 for (i in  1:8) {
 
 datos <- NbClust(d1, diss = d1, distance = NULL, method = metodos[i],
                  index = "silhouette", min.nc = 4, max.nc = 6)
- 
+
 index[,i] <- datos$All.index
 best[i,] <- datos$Best.nc
  } 
@@ -98,8 +121,11 @@ best.clusters <- best[1,1]
 ### Modelo Final con base en la optimización anterior
 
 ```{r}
+
+# Se realiza la particion de las observaciones según el mejor modelo obtenido anteriormente
 modelo1 <- hclust(d1, method = best.model)
 
+# Se realiza un grafico, para ilustrar la distribucion de la clusterizacion, con base en lo optimizado anteriormente
 fviz_dend(modelo1,
           k = best.clusters,
          cex = 1.3,
@@ -111,7 +137,10 @@ fviz_dend(modelo1,
 ### División de la base de datos 
 
 ```{r}
+#Con el modelo y la cantidad optima de clusters, se procede a asignar un cluster a cada observacion de la basee de datos y se le agrega la columna del factor de expansion.
 grupos <- cutree(modelo1, k = best.clusters)
+
+
 NDatos <- cbind(desempleadov2, Fact_expand , grupos)
 cluster <- NDatos$grupos
 
@@ -128,6 +157,10 @@ for (i in 1:best.clusters) {
 ### Aplicar el Factor de Expansión a cada grupo y exportar archivos
 
 ```{r}
+
+# Cada observación se expande según el valor de factor de expansion asignado por el INEC.
+
+# Además, cada cluster se guarda en formato csv  con el nombre datos.cluster.i.csv, para un posterior análisis.
 for (i in 1:best.clusters) {
 
 datos.cluster[[i]] <- expandRows(datos.cluster[[i]], "Fact_expand")

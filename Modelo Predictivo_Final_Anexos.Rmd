@@ -41,6 +41,7 @@ setwd("~/Documents/UNA")
 
 
 ```{r, warning=FALSE, message=FALSE}
+# La base de datos a utilizar es format .sav (codificado para SPSS software) y corresponde a un extracto de los microdatos de la  Encuesta Continua de Empleo, filtrando la region de planificación= Central y Fuerza de trabajo = Verdadero.
 
 dataset2 = read.spss("FT_CENTRAL_I_2022_v1.sav", to.data.frame=TRUE)
 
@@ -48,10 +49,13 @@ dataset2 = read.spss("FT_CENTRAL_I_2022_v1.sav", to.data.frame=TRUE)
 
 ##### Ajustar Variables
 ```{r}
+# se realiza un ajuste de la variable Edad, convirtiéndolas en aptas para la modelación. Pasánodola de tipo nivel a tipo número entero.
 dataset2$Edad <- droplevels(dataset2$Edad)
 dataset2$Edad <- as.character(dataset2$Edad)
 dataset2$Edad <- as.integer(dataset2$Edad)
 
+
+# se realiza un ajuste de las variablese Condicion actividad, idioma y nivel educativo, convirtiéndolas en factores. Siendo el nivel educativo además ordenado, debido a que dichos niveles poseen un orden lógico (Ex. Secundaria > Primaria)
 
 dataset2$Condicion_actividad <- droplevels(dataset2$Condicion_actividad)
 
@@ -63,11 +67,15 @@ dataset2$Nivel_educativo <- factor(dataset2$Nivel_educativo, ordered = TRUE)
 
 ##### Expandir Data según factor de ponderación
 ```{r}
+
+# La base de datos del INEC viene con base en la muestra y un factor de expansion que permite expandir la muestra a valores estimados de la población por lo que se crea un nuevo dataset con dicho factor aplicado.
 dataset3 <- expandRows(dataset2, "Factor_ponderacion")
 ```
 
 ##### Filtrar Variables Requeridas
 ```{r}
+# Se filtran solamente las variables a utilizar en la modelación
+
 dataset3 <- dataset3[,c(1,2,4,6,9,10)]
 str(dataset3)
 summary(dataset3)
@@ -75,8 +83,11 @@ summary(dataset3)
 
 ##### Particionar dataset para entrenar (75% de datos) y testear modelos (25% de datos)
 ```{r}
+# se utiliza la libreria ¨CreateDataPartition¨, permite dividr la muestras en 2 submuestras, con la misma proporción de la variable condicion de actividad. En este caso se divide en una muestra que contiene el 75% de datos y otra que contiene eel 25% de datos.
 
 muestra <- createDataPartition(dataset3$Condicion_actividad, p = 0.75, list = F)
+
+# posterior a la partición, se crean dos datasets: el de entrenamiento y el de testeo
 ttraining <- dataset3[muestra,]
 ttesting <- dataset3[-muestra,]
 str(ttraining)
@@ -85,12 +96,22 @@ str(ttesting)
 
 ##### Entrenar Modelo de Redes Neuronales con dataset de training
 ```{r, eval = FALSE}
+# Se ejecuta un modelo de redes neuronales, con la base de datos de entrenamiento a predecir la condicion de actividad con las demás variables como predictoras. 
+
+# Los parámetros de dicho modelo: Size, Maxnwts, rang, decay fueron previamente testeados hasta lograr resultados aceptables.
+
+
 modelo_nnet <- train.nnet(Condicion_actividad~ ., data = ttraining, size = 150, MaxNWts = 10000, rang = 0.01, decay = 5e-4, maxit = 150, trace = TRUE)
 
 ```
 
 ##### Predecir datos en tabla de testing
 ```{r, eval = FALSE}
+
+# Posteriormente a definir el modelo, este se pone a predecir la base de datos de testeo para medir su precisión.
+
+# Además, al asignar el parámetro type = prob, el modelo no despliega un resultado definido (Empleado o desempleado), sino que despliega una probabilidad dada de empleado (ej. 95%)
+
 prediccion_nnet <- predict(modelo_nnet, ttesting, type = "prob")
 
 prediccion_nnet
@@ -98,12 +119,22 @@ prediccion_nnet
 
 ##### Optimizar Corte de Probabilidad
 ```{r, eval=FALSE}
+
+# Posteerior a ejecutar el modelo en la table de testeo y como sus resultados son probabilidades, es neecesario ajustar el corte del modelo para asignar según un valor de probabilidad una observación como empleada o desempleada.
+
+# Inicialmente se definen listas en blanco donde se van a almacenar los resultados según cada valor de corte testeado.
+
 indices <- c()
 cortes <- c()
 indices.si  <- c()
 indices.no  <- c()
 
+# Se define una secuencia de numeros para testear los cortes, en este caso van de 0.10 a 0.50, con una secuencia de 0.01 (Ej. 0.10, 0.11, 0.12, etc)
+
 cort <- seq(0.10, 0.50, by = 0.01)
+
+
+# Se diseña un loop que recorre dicha secuencia de numeros, realiza el corte en la base de datos de testeo y prueba su precisión vs los valores originales de condicion de actividad.
 
  for (i in 1:50) {
    
@@ -122,7 +153,7 @@ indices.si[i] <- index$category.accuracy[1]
 indices.no[i] <- index$category.accuracy[2]
  }
 
-
+# posteriormente se unen los resultados del loop en un dataset el cual posteriormente se grafica
 resultados <- cbind(cortes, indices, indices.si, indices.no)
 resultados  <- as.data.frame(resultados)
 
@@ -139,6 +170,9 @@ print(resultados)
 
 ##### Guardar modelo
 ```{r}
+# Finalmente el modelo finalmente creado y con el valor de corte ajustado, se procede a guardar en la memoria de la computadora.
+
+
 #saveRDS(modelo_nnet, "./final_model4.rds")
 ```
 
@@ -152,20 +186,26 @@ numero.filas <- nrow(dataset2)
 cantidad.validacion.cruzada <- 1
 cantidad.grupos <- 5
 
+# Setear listas vacias donde se van a almacenar los resultados.
 indice <- c()
-
 indices.si<- c()
-
 indices.no <- c()
 
-#Iniciar Validacion Cruzada
+# Iniciar Validación Cruzada, con un loop que recorre la cantidad de validaciones cruzadas a realizar, para este caso solamente es 1.
+
 for (i in 1:cantidad.validacion.cruzada) {
+
   
+# Posteriormente se crean los 5 grupos distintos a validar mediante validación cruzada  y se asignan los valores iniciales de las listas donde se van a imprimir los resultados
 grupos <- createFolds(1:numero.filas, cantidad.grupos) 
+
 
 indice <-0
 indices.si<- 0
 indices.no <- 0
+
+# Se inicia un loop que recorre los 5 grupos, corre el modelo con los parametros datos, realiza el corte con el valor dado.
+
   for (k in 1:cantidad.grupos) {
     muestra <- grupos[[k]] 
     ttesting <- dataset2[muestra, ]
@@ -191,6 +231,9 @@ indices.no <- 0
 
 }
 
+# Posteriormente se asignan los resultados obtenidos en todos los grupos en nuevos datasets y se presentan todos en su conjunto.
+
+
 resultados.indice <- data.frame(
                          "redes_nnet" = indice)
 
@@ -202,13 +245,14 @@ resultados.indice.no <- data.frame(
 
 resultados <- rbind(resultados.indice, resultados.indice.si, resultados.indice.no)
 resultados
+
 ```
 
 ### Análisis de Casos
 
 ##### Leer modelo optimizado
-```{r}
-
+```{r, eval=FALSE}
+# Se lee el modelo creado y ajustado
 super_model <- readRDS("./final_model4.rds")
 print(super_model)
 ```
@@ -216,10 +260,16 @@ print(super_model)
 ##### Setear base de datos a analizar
 ```{r}
 
+# Se divide la base de datos en 2: desempleados y ocupados
+
 desempleado <- subset(dataset3, dataset3$Condicion_actividad == "Desempleado")
 ocupado <- subset(dataset3, dataset3$Condicion_actividad == "Ocupado")
 
+# El modelo va aplicar solamente a los desempleados, para el caso de los ocupados su condicion de actividad se mantendrá constante.
+
 ocupado$Prediccion <- as.factor("Ocupado")
+
+# Resumen de ambos datasets
 summary(desempleado)
 
 summary(ocupado)
@@ -228,41 +278,55 @@ summary(ocupado)
 
 #### Caso 1: Dominio de Segundo Idioma
 
-##### Simulacion 1.1: Toda la muestra con variable idioma ajustada
-```{r,  message=FALSE, warning=FALSE}
+##### Simulacion 1 Toda la muestra con variable idioma ajustada
+```{r,  message=FALSE, warning=FALSE, eval = FALSE}
+
+# Se crea una nueva base de datos para la simulacion 1
 desempleado.1 <- desempleado
+
+# Se asigna a la variable idioma = 1 (Todos con dominio de idioma) y se ajusta como un factor.
 desempleado.1$Idioma <- 1
 desempleado.1$Idioma <-factor(desempleado.1$Idioma, levels= c("1", "2"),     labels=c("Sí", "No"))
 
+# Se realiza la predicción con el modelo leído, la nueva base de datos y con el parámetro que determina probabilidades
+
 prediccion1 <- predict(super_model, desempleado.1, type = "prob")
 
+# Se aplica el corte, según lo optimizado anteriormente
 Corte <-0.15
 
-    Clase <- desempleado.1[,2]
-    Score <- prediccion1$prediction[,2]
-    Prediccion <- ifelse(Score > Corte, "Desempleado", "Ocupado")
-    MC <- table(Clase, Pred = factor(Prediccion, levels = c("Ocupado", "Desempleado")))
+# Se crea la matriz de confusión y sus respectivos indicadores de precisión
+Clase <- desempleado.1[,2]
+Score <- prediccion1$prediction[,2]
+Prediccion <- ifelse(Score > Corte, "Desempleado", "Ocupado")
+MC <- table(Clase, Pred = factor(Prediccion, levels = c("Ocupado", "Desempleado")))
 
-    index <- general.indexes(mc = MC)
-    indice <- index$overall.accuracy
-    indices.si <- index$category.accuracy[1]
-    indices.no <- index$category.accuracy[2]
+index <- general.indexes(mc = MC)
+indice <- index$overall.accuracy
+indices.si <- index$category.accuracy[1]
+indices.no <- index$category.accuracy[2]
     
-    Prediccion <- as.factor(Prediccion)
+# Se guarda la prediccion en una variable y se le añade al dataset desempleado
+Prediccion <- as.factor(Prediccion)
+resultados1 <- cbind (desempleado.1,  Prediccion)
 
-    resultados1 <- cbind (desempleado.1,  Prediccion)
-    
-   resultados1.1  <- rbind(resultados1, ocupado)
+# Se une el dataset de desempleado con la prediccion con el dataset de los ocupados, para medir el impacto de la simulación  
+resultados1.1  <- rbind(resultados1, ocupado)
    
-   tab1(resultados1.1$Prediccion, sort.group = "decreasing", graph = FALSE)
+tab1(resultados1.1$Prediccion, sort.group = "decreasing", graph = FALSE)
 
-  tab1(resultados1.1$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+tab1(resultados1.1$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+
+# Por último, se procede a guardar la simulación en un archivo csv
 
   #write.csv(resultados1.1, "Caso1_simulado.csv")
 ```
 
-###### Simulacion 1.2: Mujeres
-```{r}
+<!--  Seguidamente se hacen particiones según los distintos grupos analizados: Mujeres, Hombres, Zona Urbana, Zona Rural y 3 grupos de edad (<= 25, <= 35 y >35) para evaluar su respectivo impacto con la simulación-->
+
+
+###### Simulacion 1.1: Mujeres
+```{r,eval = FALSE}
 desempleado.1.2 <- subset(resultados1.1, Sexo == "Mujer")
     
 tab1(desempleado.1.2$Prediccion, sort.group = "decreasing", graph = FALSE)
@@ -272,8 +336,8 @@ tab1(desempleado.1.2$Condicion_actividad, sort.group = "decreasing", graph = FAL
 ```
 
 
-###### Simulacion 1.3: Hombres
-```{r}
+###### Simulacion 1.2: Hombres
+```{r,eval = FALSE}
 desempleado.1.3 <- subset(resultados1.1, Sexo == "Hombre")
 
 tab1(desempleado.1.3$Prediccion, sort.group = "decreasing", graph = FALSE)
@@ -283,9 +347,8 @@ tab1(desempleado.1.3$Condicion_actividad, sort.group = "decreasing", graph = FAL
 ```
 
 
-
-###### Simulacion 1.4: Zona Urbana
-```{r}
+###### Simulacion 1.3: Zona Urbana
+```{r,eval = FALSE}
 desempleado.1.4 <- subset(resultados1.1, Zona == "Urbana")
 
 tab1(desempleado.1.4$Prediccion, sort.group = "decreasing", graph = FALSE)
@@ -294,8 +357,8 @@ tab1(desempleado.1.4$Condicion_actividad, sort.group = "decreasing", graph = FAL
 
 ```
 
-###### Simulacion 1.5: Zona Rural
-```{r}
+###### Simulacion 1.4: Zona Rural
+```{r,eval = FALSE}
 desempleado.1.5 <- subset(resultados1.1, Zona == "Rural")
 
 tab1(desempleado.1.5$Prediccion, sort.group = "decreasing", graph = FALSE)
@@ -305,8 +368,8 @@ tab1(desempleado.1.5$Condicion_actividad, sort.group = "decreasing", graph = FAL
 ```
 
 
-###### Simulacion 1.6: 25 años o menos
-```{r}
+###### Simulacion 1.5: 25 años o menos
+```{r,eval = FALSE}
 desempleado.1.6 <- subset(resultados1.1, Edad <= 25)
      
 tab1(desempleado.1.6$Prediccion, sort.group = "decreasing", graph = FALSE)
@@ -315,8 +378,8 @@ tab1(desempleado.1.6$Prediccion, sort.group = "decreasing", graph = FALSE)
 ```
 
 
-###### Simulacion 1.7: 35 años o menos
-```{r}
+###### Simulacion 1.6: 35 años o menos
+```{r,eval = FALSE}
 desempleado.1.7 <- subset(resultados1.1, Edad <= 35)
      
 tab1(desempleado.1.7$Prediccion, sort.group = "decreasing", graph = FALSE)
@@ -325,20 +388,24 @@ tab1(desempleado.1.7$Condicion_actividad, sort.group = "decreasing", graph = FAL
 ```
 
 
-###### Simulacion 1.8: 36 años o mas
-```{r}
+###### Simulacion 1.7: 36 años o mas
+```{r,eval = FALSE}
 desempleado.1.8 <- subset(resultados1.1, Edad > 35)
 
-    tab1(desempleado.1.8$Prediccion, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.1.8$Prediccion, sort.group = "decreasing", graph = FALSE)
 
-     tab1(desempleado.1.8$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.1.8$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
 ```
 
 #### Caso 2: Todos Secundaria Completa o Superior
 
-###### Simulacion 2.1: Toda la muestra con variable educación ajustada
-```{r, message=FALSE, warning=FALSE}
+###### Simulacion 2: Toda la muestra con variable educación ajustada
+```{r, message=FALSE, warning=FALSE,eval = FALSE}
+# Se crea una nueva base de datos para la simulacion 1
 desempleado.2 <- desempleado
+
+# Se ajusta la variable Nivel educativo, dejando a todas las personas con nivel inferior a secundaria completa, con con secundaria completa y las demás constantes.
+
 desempleado.2$Nivel_educativo <- as.numeric(desempleado.2$Nivel_educativo)
 desempleado.2$Nivel_educativo <- ifelse(desempleado.2$Nivel_educativo<=5, 5, desempleado.2$Nivel_educativo)
 desempleado.2$Nivel_educativo <-factor (desempleado.2$Nivel_educativo, levels= c("1", "2","3","4","5","6","7"),labels=c("Ninguno", "Primaria incompleta",                   "Primaria completa","Secundaria incompleta", "Secundaria completa", "Universitario sin título", "Universitario con título"))
@@ -347,90 +414,99 @@ summary(desempleado.2)
 ```
 
 
-```{r}
-prediccion2 <- predict(super_model, desempleado.2, type = "prob")
+```{r,eval = FALSE}
 
+# Se realiza la predicción con el dataset ajustado y se le asigna el corte
+prediccion2 <- predict(super_model, desempleado.2, type = "prob")
 Corte <-0.15
 
-    Clase <- desempleado.2[,2]
-    Score <- prediccion2$prediction[,2]
-    Prediccion <- ifelse(Score > Corte, "Desempleado", "Ocupado")
-    MC <- table(Clase, Pred = factor(Prediccion, levels = c("Ocupado", "Desempleado")))
+# Se calcula la matriz de confusión y los indicadores de precisión del modelo
 
-    index <- general.indexes(mc = MC)
-    indice <- index$overall.accuracy
-    indices.si <- index$category.accuracy[1]
-    indices.no <- index$category.accuracy[2]
-    
-    Prediccion <- as.factor(Prediccion)
+Clase <- desempleado.2[,2]
+Score <- prediccion2$prediction[,2]
+Prediccion <- ifelse(Score > Corte, "Desempleado", "Ocupado")
+MC <- table(Clase, Pred = factor(Prediccion, levels = c("Ocupado", "Desempleado")))
 
-    resultados2 <- cbind (desempleado.2,  Prediccion)
-    
-   resultados2.1  <- rbind(resultados2, ocupado)
-    #summary(resultados1.1)
+index <- general.indexes(mc = MC)
+indice <- index$overall.accuracy
+indices.si <- index$category.accuracy[1]
+indices.no <- index$category.accuracy[2]
 
-     tab1(resultados2.1$Prediccion, sort.group = "decreasing", graph = FALSE)
+# Se convierte la predicción en una variable y se le añade al dataset desempleado simulado
 
-     tab1(resultados2.1$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+Prediccion <- as.factor(Prediccion)
+resultados2 <- cbind (desempleado.2,  Prediccion)
+
+# se une el dataset desempleado con el ocupado y se evalúa el impacto de la simulación
+
+resultados2.1  <- rbind(resultados2, ocupado)
+
+tab1(resultados2.1$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+tab1(resultados2.1$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+
+# Por último, se guarda la simulación en tipo csv
+
 #write.csv(resultados2.1, "Caso2_simulado.csv")
 ```
 
-###### Simulacion 2.2: Mujeres
-```{r}
+<!--  Seguidamente se hacen particiones según los distintos grupos analizados: Mujeres, Hombres, Zona Urbana, Zona Rural y 3 grupos de edad (<= 25, <= 35 y >35) para evaluar su respectivo impacto con la simulación-->
+
+###### Simulacion 2.1: Mujeres
+```{r,eval = FALSE}
 desempleado.2.2 <- subset(resultados2.1, Sexo == "Mujer")
 
+tab1(desempleado.2.2$Prediccion, sort.group = "decreasing", graph = FALSE)
 
-    tab1(desempleado.2.2$Prediccion, sort.group = "decreasing", graph = FALSE)
-
-     tab1(desempleado.2.2$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.2.2$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
 
 ```
 
 
-###### Simulacion 2.3: Hombres
-```{r}
+###### Simulacion 2.2: Hombres
+```{r,eval = FALSE}
 desempleado.2.3 <- subset(resultados2.1, Sexo == "Hombre")
 
-    tab1(desempleado.2.3$Prediccion, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.2.3$Prediccion, sort.group = "decreasing", graph = FALSE)
 
-     tab1(desempleado.2.3$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.2.3$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
 
 ```
 
 
 
-###### Simulacion 2.4: Zona Urbana
-```{r}
+###### Simulacion 2.3: Zona Urbana
+```{r,eval = FALSE}
 desempleado.2.4 <- subset(resultados2.1, Zona == "Urbana")
 
-    tab1(desempleado.2.4$Prediccion, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.2.4$Prediccion, sort.group = "decreasing", graph = FALSE)
 
-     tab1(desempleado.2.4$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.2.4$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
 
 ```
 
-###### Simulacion 2.5: Zona Rural
-```{r}
+###### Simulacion 2.4: Zona Rural
+```{r,eval = FALSE}
 desempleado.2.5 <- subset(resultados2.1, Zona == "Rural")
 
-    tab1(desempleado.2.5$Prediccion, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.2.5$Prediccion, sort.group = "decreasing", graph = FALSE)
 
-     tab1(desempleado.2.5$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.2.5$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
 
 ```
 
-###### Simulacion 2.6: 25 años o menos
-```{r}
+###### Simulacion 2.5: 25 años o menos
+```{r,eval = FALSE}
 desempleado.2.6 <- subset(resultados2.1, Edad <= 25)
 
-    tab1(desempleado.2.6$Prediccion, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.2.6$Prediccion, sort.group = "decreasing", graph = FALSE)
 
-     tab1(desempleado.2.6$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.2.6$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
 ```
 
 
-###### Simulacion 2.7: 35 años o menos
-```{r}
+###### Simulacion 2.6: 35 años o menos
+```{r,eval = FALSE}
 desempleado.2.7 <- subset(resultados2.1, Edad <= 35)
 
     tab1(desempleado.2.7$Prediccion, sort.group = "decreasing", graph = FALSE)
@@ -439,134 +515,146 @@ desempleado.2.7 <- subset(resultados2.1, Edad <= 35)
 ```
 
 
-###### Simulacion 2.8: 36 años o mas
-```{r}
+###### Simulacion 2.7: 36 años o mas
+```{r,eval = FALSE}
 desempleado.2.8 <- subset(resultados2.1, Edad > 35)
 
-    tab1(desempleado.2.8$Prediccion, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.2.8$Prediccion, sort.group = "decreasing", graph = FALSE)
 
-     tab1(desempleado.2.8$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.2.8$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
 ```
 
 
 #### Caso 3: Todos Secundaria Completa o Superior y Dominio de Segundo Idioma
 
 
-###### Simulacion 3.1: Toda la muestra con variables educación e idioma Ajustadas
-```{r, message=FALSE, warning=FALSE}
+###### Simulacion 3: Toda la muestra con variables educación e idioma Ajustadas
+```{r, message=FALSE, warning=FALSE,eval = FALSE}
+# Se crea un nuevo dataset para la simulación
 desempleado.3 <- desempleado
+
+# Se asigna a la variable idioma = 1 (Todos con dominio de idioma) y se ajusta como un factor.
 desempleado.3$Idioma <- 1
 desempleado.3$Idioma <-factor(desempleado.3$Idioma, levels= c("1", "2"),     labels=c("Sí", "No"))
+
+# Se ajusta la variable Nivel educativo, dejando a todas las personas con nivel inferior a secundaria completa, con con secundaria completa y las demás constantes.
 
 desempleado.3$Nivel_educativo <- as.numeric(desempleado.3$Nivel_educativo)
 desempleado.3$Nivel_educativo <- ifelse(desempleado.3$Nivel_educativo<=5, 5, desempleado.3$Nivel_educativo)
 desempleado.3$Nivel_educativo <-factor (desempleado.3$Nivel_educativo, levels= c("1", "2","3","4","5","6","7"),labels=c("Ninguno", "Primaria incompleta",                   "Primaria completa","Secundaria incompleta", "Secundaria completa", "Universitario sin título", "Universitario con título"))
 
 
-
 summary(desempleado.3)
 ```
 
 
-```{r}
+```{r,eval = FALSE}
+# Se realiza la predicción con el modelo previamente ajustado y el tipo = probailidades
 prediccion3 <- predict(super_model, desempleado.3, type = "prob")
-
 Corte <-0.15
 
-    Clase <- desempleado.3[,2]
-    Score <- prediccion3$prediction[,2]
-    Prediccion <- ifelse(Score > Corte, "Desempleado", "Ocupado")
-    MC <- table(Clase, Pred = factor(Prediccion, levels = c("Ocupado", "Desempleado")))
 
-    index <- general.indexes(mc = MC)
-    indice <- index$overall.accuracy
-    indices.si <- index$category.accuracy[1]
-    indices.no <- index$category.accuracy[2]
-    
-    Prediccion <- as.factor(Prediccion)
+Clase <- desempleado.3[,2]
+Score <- prediccion3$prediction[,2]
+Prediccion <- ifelse(Score > Corte, "Desempleado", "Ocupado")
+MC <- table(Clase, Pred = factor(Prediccion, levels = c("Ocupado", "Desempleado")))
 
-    resultados3 <- cbind (desempleado.3,  Prediccion)
-    
-   resultados3.1  <- rbind(resultados3, ocupado)
-    #summary(resultados1.1)
+index <- general.indexes(mc = MC)
+indice <- index$overall.accuracy
+indices.si <- index$category.accuracy[1]
+indices.no <- index$category.accuracy[2]
 
-     tab1(resultados3.1$Prediccion, sort.group = "decreasing", graph = FALSE)
+# Se guarda la prediccion en una variable y  se le añade al dataset de desempleados
+Prediccion <- as.factor(Prediccion)
 
-     tab1(resultados3.1$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+resultados3 <- cbind (desempleado.3,  Prediccion)
+
+# Se unen los datasets de desempleados y ocupados
+
+resultados3.1  <- rbind(resultados3, ocupado)
+
+
+# Se evalúan los cambios con las simulaciones
+tab1(resultados3.1$Prediccion, sort.group = "decreasing", graph = FALSE)
+
+tab1(resultados3.1$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+
+# se guardan los resultados de la simulación en tipo csv
+
 #write.csv(resultados3.1, "Caso3_simulado.csv")
 ```
 
-###### Simulacion 3.2:  Mujeres
-```{r}
+<!--  Seguidamente se hacen particiones según los distintos grupos analizados: Mujeres, Hombres, Zona Urbana, Zona Rural y 3 grupos de edad (<= 25, <= 35 y >35) para evaluar su respectivo impacto con la simulación-->
+
+###### Simulacion 3.1:  Mujeres
+```{r,eval = FALSE}
 desempleado.3.2 <- subset(resultados3.1, Sexo == "Mujer")
 
-    tab1(desempleado.3.2$Prediccion, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.3.2$Prediccion, sort.group = "decreasing", graph = FALSE)
 
-     tab1(desempleado.3.2$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.3.2$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
 
 ```
 
 
-###### Simulacion 3.3: Hombres
-```{r}
+###### Simulacion 3.2: Hombres
+```{r,eval = FALSE}
 desempleado.3.3 <- subset(resultados3.1, Sexo == "Hombre")
 
-    tab1(desempleado.3.3$Prediccion, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.3.3$Prediccion, sort.group = "decreasing", graph = FALSE)
 
-     tab1(desempleado.3.3$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.3.3$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
 
 ```
 
 
 
-###### Simulacion 3.4: Zona Urbana
-```{r}
+###### Simulacion 3.3: Zona Urbana
+```{r,eval = FALSE}
 desempleado.3.4 <- subset(resultados3.1, Zona == "Urbana")
      
+tab1(desempleado.3.4$Prediccion, sort.group = "decreasing", graph = FALSE)
 
-    tab1(desempleado.3.4$Prediccion, sort.group = "decreasing", graph = FALSE)
-
-     tab1(desempleado.3.4$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.3.4$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
 
 ```
 
-###### Simulacion 3.5: Zona Rural
-```{r}
+###### Simulacion 3.4: Zona Rural
+```{r,eval = FALSE}
 desempleado.3.5 <- subset(resultados3.1, Zona == "Rural")
      
+tab1(desempleado.3.5$Prediccion, sort.group = "decreasing", graph = FALSE)
 
-    tab1(desempleado.3.5$Prediccion, sort.group = "decreasing", graph = FALSE)
-
-     tab1(desempleado.3.5$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.3.5$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
 
 ```
 
-###### Simulacion 3.6: Todos Secundaria e idioma 25 años o menos
-```{r}
+###### Simulacion 3.5: 25 años o menos
+```{r,eval = FALSE}
 desempleado.3.6 <- subset(resultados3.1, Edad <= 25)
 
-    tab1(desempleado.3.6$Prediccion, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.3.6$Prediccion, sort.group = "decreasing", graph = FALSE)
 
-     tab1(desempleado.3.6$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.3.6$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
 ```
 
 
-###### Simulacion 3.7:  35 años o menos
-```{r}
+###### Simulacion 3.6:  35 años o menos
+```{r,eval = FALSE}
 desempleado.3.7 <- subset(resultados3.1, Edad <= 35)
 
-    tab1(desempleado.3.7$Prediccion, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.3.7$Prediccion, sort.group = "decreasing", graph = FALSE)
 
-     tab1(desempleado.3.7$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.3.7$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
 ```
 
-###### Simulacion 3.8:  36 años o mas
-```{r}
+###### Simulacion 3.7:  36 años o mas
+```{r,eval = FALSE}
 desempleado.3.8 <- subset(resultados3.1, Edad > 35)
      
-    tab1(desempleado.3.8$Prediccion, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.3.8$Prediccion, sort.group = "decreasing", graph = FALSE)
 
-     tab1(desempleado.3.8$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
+tab1(desempleado.3.8$Condicion_actividad, sort.group = "decreasing", graph = FALSE)
 ```
 
 
